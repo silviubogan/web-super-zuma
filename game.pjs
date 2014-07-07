@@ -1,0 +1,245 @@
+/* @pjs preload="55741.jpg"; */
+
+var level, chainBalls = [], bulletBalls = [], paused = false, balls = 0, zuma,
+	firstBall = true;
+
+function randomElement (array) { return array[floor(random() * array.length)]; }
+function sign (x) { return x > 0 ? 1 : (x < 0 ? -1 : 0); }
+
+var pauser = {
+	queue: [],
+	addAndPause: function (pauseIndex, previousIndex, x, y, xrIsMax, yrIsMax) {
+		this.pause(pauseIndex);
+		this.queue.push({
+			"pauseIndex": pauseIndex,
+			"previousIndex": previousIndex,
+			"x": x,
+			"y": y,
+			"xrIsMax": xrIsMax,
+			"yrIsMax": yrIsMax
+		});
+	},
+	update: function () {
+		for (var i in this.queue) {
+			var queueObject = this.queue[i], validX, validY;
+			
+			/* while (typeof chainBalls[queueObject.previousIndex] == "undefined" &&
+				   queueObject.previousIndex < chainBalls.length) {
+				queueObject.previousIndex++;
+			}*/
+			
+			if (queueObject.xrIsMax) {
+				validX = chainBalls[queueObject.previousIndex].x >= queueObject.x;
+			} else {
+				validX = chainBalls[queueObject.previousIndex].x <= queueObject.x;
+			}
+			
+			if (queueObject.yrIsMax) {
+				validY = chainBalls[queueObject.previousIndex].y >= queueObject.y;
+			} else {
+				validY = chainBalls[queueObject.previousIndex].y <= queueObject.y;
+			}
+			 
+			if (validX && validY) {
+				this.unpause(queueObject.pauseIndex);
+				this.queue.splice(i, 1);
+			}
+		}
+	},
+	unpause: function (index) {
+		for (var i = index; i >= 0; i--) {
+			chainBalls[i].paused = false;
+		}
+	},
+	pause: function (index) {
+		for (var i = index; i >= 0; i--) {
+			chainBalls[i].paused = true;
+		}
+	}
+};
+
+void setup () {
+	size(800, 550);
+	frameRate(30);
+	zuma = new Zuma(width / 2);
+	level = {
+		balls: 30,
+		bgimage: loadImage("55741.jpg"), // http://wall.alphacoders.com/big.php?i=55741
+		path: {
+			startY: 100,
+			steps: [
+				["right", width / 3],
+				["down", height / 2],
+				["right", width / 3],
+				["up", height / 2],
+				["right", "rest"]
+			]
+		}
+	};
+}
+
+void draw () {
+	image(level.bgimage, 0, 0, width, height);
+	
+	for (var i in chainBalls) {
+		chainBalls[i].draw();
+	}
+	for (var i in bulletBalls) {
+		bulletBalls[i].draw();
+	}
+	
+	if (firstBall) {
+		new ChainBall(level.path);
+		firstBall = false;
+	}
+	
+	pauser.update();
+	zuma.draw();
+}
+
+void mouseMoved () {
+	if (mouseX != pmouseX) {
+		zuma.x = mouseX;
+	}
+}
+void mouseClicked () {
+	zuma.shoot();
+}
+void keyPressed () {
+	if (!paused) noLoop();
+	else loop();
+	paused = !paused;
+}
+
+class Zuma {
+	int x;
+	Zuma (int x) {
+		this.x = x;
+	}
+	void draw () {
+		var fillColor = color(255, 255, 0), w = 100, h = 75,
+			eyeFillColor = color(100, 100, 255);
+		
+		stroke(color(255, 127, 0));
+		
+		fill(fillColor);
+		ellipse(this.x, height, w, h);
+		
+		fill(eyeFillColor);
+		ellipse(this.x - 15, height - 15, 10, 10);
+		ellipse(this.x + 15, height - 15, 10, 10);
+	}
+	void shoot () {
+		new Audio("laser.ogg").play();
+		new BulletBall(this.x);
+	}
+}
+
+class ChainBall extends Ball {
+	var step = 0, coveredDistance = 0, totalCoveredDistance = 0,
+		speed = 3, paused = false, ballCreated = false;
+	Object path;
+	ChainBall (Object path) {
+		this.path = path;
+		super(-50, this.path.startY, 25);
+		chainBalls.push(this);
+	}
+	void draw () {
+		if (paused == false) {
+			this.totalCoveredDistance += this.speed;
+			switch (this.path.steps[this.step][0]) {
+			case "left":
+				this.x -= this.speed;
+				break;
+			case "right":
+				this.x += this.speed;
+				break;
+			case "up":
+				this.y -= this.speed;
+				break;
+			case "down":
+				this.y += this.speed;
+				break;
+			default:
+				println("Unknown path direction: " + this.path.steps[this.step][0]);
+				break;
+			}
+			if (this.path.steps[this.step][1] != "rest") {
+				this.coveredDistance += this.speed;
+				if (this.path.steps[this.step][1] <= this.coveredDistance) {
+					this.step++;
+					this.coveredDistance = 0;
+				}
+			}
+			
+			if (!ballCreated && balls < level.balls &&
+				this.totalCoveredDistance >= this.radius * 2 - 3) {
+				new ChainBall(this.path);
+				balls++;
+				ballCreated = true;
+			}
+			
+			if (this.x >= width + 2 * this.radius) {
+				chainBalls.splice(chainBalls.indexOf(this), 1);
+			}
+		}
+		super.draw();
+	}
+}
+
+class BulletBall extends Ball {
+	int speed = 8;
+	BulletBall (int x) {
+		super(x, height, 25);
+		distanceFromLastBall = 0;
+		bulletBalls.push(this);
+	}
+	void draw () {
+		this.y -= this.speed;
+		for (var i in chainBalls) {
+			var xr = chainBalls[i].x, yr = chainBalls[i].y,
+				distance = sqrt(sq(yr - this.y) + sq(xr - this.x));
+			if (2 * this.radius >= distance) {
+				var xp, yp, xn, yn;
+				chainBalls.splice(i, 1);
+				
+				if (typeof chainBalls[i] != "undefined" &&
+					typeof chainBalls[i - 1] != "undefined") {
+					xp = chainBalls[i].x;		yp = chainBalls[i].y;
+					xn = chainBalls[i - 1].x;	yn = chainBalls[i - 1].y;
+					pauser.addAndPause(i - 1, i, xr, yr, xr > xp, yr > yp);
+				}
+				
+				bulletBalls.splice(bulletBalls.indexOf(this), 1);
+			}
+		}
+		if (this.y + 2 * this.radius <= 0) {
+			bulletBalls.splice(bulletBalls.indexOf(this), 1);
+		}
+		super.draw();
+	}
+}
+
+abstract class Ball {
+	color fillColor = randomElement([color(255, 255, 0), color(0, 0, 255),
+									color(50, 255, 50), color(#00FFFF),
+									color(#FF2052), color(#CD7F32)]);
+	int x, y, radius;
+	Ball (int x, int y, int radius) {
+		this.x = x;
+		this.y = y;
+		this.radius = radius;
+	}
+	void draw () {
+		noStroke();
+		
+		fill(this.fillColor);
+		ellipse(this.x, this.y, this.radius * 2, this.radius * 2);
+		
+		fill(blendColor(this.fillColor, color(100, 100, 100), LIGHTEST));
+		ellipse(this.x, this.y, 4 * this.radius / 3, 4 * this.radius / 3);
+		
+		fill(blendColor(this.fillColor, color(150, 150, 150), LIGHTEST));
+		ellipse(this.x, this.y, 2 * this.radius / 3, 2 * this.radius / 3);
+	}
+}
